@@ -12,11 +12,13 @@ import {{ module }}
 {% endfor %}
 from typing import ClassVar, Generic, Literal, Protocol, TypeVar, cast, overload
 
-from pydantic import TypeAdapter
+from pydantic import BaseModel, TypeAdapter
 
 from .models import (
 {% for table in tables %}
+    {{ table.insert_class }},
     {{ table.row_class }},
+    {{ table.update_class }},
     {% for projection in table.projections %}
     {{ projection.class_name }},
     {% endfor %}
@@ -36,17 +38,31 @@ class _Select:
         return ",".join(self.columns)
 
 
+def _model_payload(model: BaseModel) -> dict[str, object]:
+    payload: dict[str, object] = {}
+    for name in model.model_fields_set:
+        payload[name] = cast(object, getattr(model, name))
+    return payload
+
+
 class _Queryable(Protocol):
     _filters: list[tuple[str, str, str]]
     _select: _Select
+    _mutation: tuple[str, dict[str, object]] | None
+    _on_conflict: str
+    _order: list[tuple[str, bool]]
+    _limit: int | None
+    _offset: int | None
+    _range: tuple[int, int] | None
+    _single: bool
 
 
 class _SyncHttpTransport(Protocol):
-    def fetch_rows(self, table: str, builder: _Queryable) -> list[object]: ...
+    def fetch(self, table: str, builder: _Queryable) -> object: ...
 
 
 class _AsyncHttpTransport(Protocol):
-    async def fetch_rows(self, table: str, builder: _Queryable) -> list[object]: ...
+    async def fetch(self, table: str, builder: _Queryable) -> object: ...
 
 
 {% macro filter_methods(table, ret, store) %}
@@ -165,6 +181,31 @@ class _AsyncHttpTransport(Protocol):
     def is_(self, column: str, value: Literal["null", "not.null"]) -> {{ ret }}:
         {{ store }}._filters.append((column, "is", value))
         return self
+
+{% for column in table.columns %}
+    @overload
+    def order(
+        self,
+        column: Literal["{{ column.name }}"],
+        *,
+        desc: bool = False,
+    ) -> {{ ret }}: ...
+{% endfor %}
+    def order(self, column: str, *, desc: bool = False) -> {{ ret }}:
+        {{ store }}._order.append((column, desc))
+        return self
+
+    def limit(self, count: int) -> {{ ret }}:
+        {{ store }}._limit = count
+        return self
+
+    def offset(self, count: int) -> {{ ret }}:
+        {{ store }}._offset = count
+        return self
+
+    def range(self, start: int, end: int) -> {{ ret }}:
+        {{ store }}._range = (start, end)
+        return self
 {% endmacro %}
 
 {% for table in tables %}
@@ -174,6 +215,13 @@ class {{ table.prefix }}QueryBuilder:
     def __init__(self) -> None:
         self._filters: list[tuple[str, str, str]] = []
         self._select: _Select = _Select(("*",))
+        self._mutation: tuple[str, dict[str, object]] | None = None
+        self._on_conflict = ""
+        self._order: list[tuple[str, bool]] = []
+        self._limit: int | None = None
+        self._offset: int | None = None
+        self._range: tuple[int, int] | None = None
+        self._single = False
         self._sync_transport: _SyncHttpTransport | None = None
         self._async_transport: _AsyncHttpTransport | None = None
 
@@ -184,6 +232,32 @@ class {{ table.prefix }}QueryBuilder:
         return str(value)
 
 {{ filter_methods(table, table.prefix ~ "QueryBuilder", "self") }}
+    def insert(self, row: {{ table.insert_class }}) -> {{ table.prefix }}Query[{{ table.row_class }}]:
+        self._mutation = ("insert", _model_payload(row))
+        self._select = _Select(("*",))
+        return {{ table.prefix }}Query(self, _{{ table.table_name }}_star)
+
+    def upsert(
+        self,
+        row: {{ table.insert_class }},
+        *,
+        on_conflict: str = "",
+    ) -> {{ table.prefix }}Query[{{ table.row_class }}]:
+        self._on_conflict = on_conflict
+        self._mutation = ("upsert", _model_payload(row))
+        self._select = _Select(("*",))
+        return {{ table.prefix }}Query(self, _{{ table.table_name }}_star)
+
+    def update(self, row: {{ table.update_class }}) -> {{ table.prefix }}Query[{{ table.row_class }}]:
+        self._mutation = ("update", _model_payload(row))
+        self._select = _Select(("*",))
+        return {{ table.prefix }}Query(self, _{{ table.table_name }}_star)
+
+    def delete(self) -> {{ table.prefix }}Query[{{ table.row_class }}]:
+        self._mutation = ("delete", {})
+        self._select = _Select(("*",))
+        return {{ table.prefix }}Query(self, _{{ table.table_name }}_star)
+
     @overload
     def select(self, column: Literal["*"], /) -> {{ table.prefix }}Query[{{ table.row_class }}]: ...
 {% for spec in table.select_overloads %}
@@ -218,13 +292,18 @@ class {{ table.prefix }}Query(Generic[_RowT]):
         self._adapter = adapter
 
 {{ filter_methods(table, table.prefix ~ "Query[_RowT]", "self._parent") }}
+    def single(self) -> {{ table.prefix }}Single[_RowT]:
+        self._parent._single = True
+        return {{ table.prefix }}Single(self._parent, self._adapter)
+
     def execute(self) -> list[_RowT]:
         transport = self._parent._sync_transport
         if transport is None:
             empty: list[_RowT] = []
             return empty
-        raw = transport.fetch_rows({{ table.prefix }}QueryBuilder._table_name, self._parent)
-        parsed = cast(TypeAdapter[list[_RowT]], self._adapter).validate_python(raw)
+        raw = transport.fetch({{ table.prefix }}QueryBuilder._table_name, self._parent)
+        rows = raw if isinstance(raw, list) else [raw]
+        parsed = cast(TypeAdapter[list[_RowT]], self._adapter).validate_python(rows)
         return parsed
 
     async def execute_async(self) -> list[_RowT]:
@@ -232,9 +311,34 @@ class {{ table.prefix }}Query(Generic[_RowT]):
         if transport is None:
             empty: list[_RowT] = []
             return empty
-        raw = await transport.fetch_rows({{ table.prefix }}QueryBuilder._table_name, self._parent)
-        parsed = cast(TypeAdapter[list[_RowT]], self._adapter).validate_python(raw)
+        raw = await transport.fetch({{ table.prefix }}QueryBuilder._table_name, self._parent)
+        rows = raw if isinstance(raw, list) else [raw]
+        parsed = cast(TypeAdapter[list[_RowT]], self._adapter).validate_python(rows)
         return parsed
+
+
+class {{ table.prefix }}Single(Generic[_RowT]):
+    def __init__(self, parent: {{ table.prefix }}QueryBuilder, adapter: object) -> None:
+        self._parent = parent
+        self._adapter = adapter
+
+    def execute(self) -> _RowT:
+        transport = self._parent._sync_transport
+        if transport is None:
+            msg = "query is not bound to a client"
+            raise RuntimeError(msg)
+        raw = transport.fetch({{ table.prefix }}QueryBuilder._table_name, self._parent)
+        parsed = cast(TypeAdapter[list[_RowT]], self._adapter).validate_python([raw])
+        return parsed[0]
+
+    async def execute_async(self) -> _RowT:
+        transport = self._parent._async_transport
+        if transport is None:
+            msg = "query is not bound to a client"
+            raise RuntimeError(msg)
+        raw = await transport.fetch({{ table.prefix }}QueryBuilder._table_name, self._parent)
+        parsed = cast(TypeAdapter[list[_RowT]], self._adapter).validate_python([raw])
+        return parsed[0]
 
 
 _{{ table.table_name }}_star: object = TypeAdapter(list[{{ table.row_class }}])

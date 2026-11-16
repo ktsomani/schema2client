@@ -2,9 +2,9 @@
 
 [![PyPI version](https://img.shields.io/pypi/v/schema2client.svg)](https://pypi.org/project/schema2client/)
 [![mypy strict](https://img.shields.io/badge/mypy-strict-blue)](https://mypy-lang.org/)
-[![types: zero ignores](https://img.shields.io/badge/types-zero%20ignores-blue)](https://github.com/soman/schema2client#the-receipt)
+[![types: zero ignores](https://img.shields.io/badge/types-zero%20ignores-blue)](https://github.com/ktsomani/schema2client#the-receipt)
 [![ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
-[![ci](https://github.com/soman/schema2client/actions/workflows/ci.yml/badge.svg)](https://github.com/soman/schema2client/actions/workflows/ci.yml)
+[![ci](https://github.com/ktsomani/schema2client/actions/workflows/ci.yml/badge.svg)](https://github.com/ktsomani/schema2client/actions/workflows/ci.yml)
 
 Generate a typed PostgREST **client package** from an OpenAPI schema (`GET /rest/v1/`).
 
@@ -31,21 +31,33 @@ zero type: ignore in generated output
 
 ## Column narrowing
 
-`select` takes `"*"` or **one to three** column names as separate arguments. Each argument order is its own overload. The result type is one `TypedDict` per column set (names sorted in the class name), so `select("id", "email")` and `select("email", "id")` are both `list[Users_email_id]`. `.eq()` after `select` returns that same query, so `.execute()` stays narrowed.
+``select`` takes ``"*"`` or **one to three** column names as separate arguments. Each argument order is its own overload. The result type is one `TypedDict` per column set (names sorted in the class name), so `select("id", "email")` and `select("email", "id")` are both `list[Users_email_id]`. `.eq()` after `select` returns that same query, so `.execute()` stays narrowed. Passing four names is rejected by mypy and, at runtime, by `ValueError`.
 
 ```python
-from mydb import Client
+from mydb import Client, UsersInsert, UsersUpdate
 
-client = Client("https://example.supabase.co/rest/v1", "anon-key")
+client = Client(
+    "https://example.supabase.co/rest/v1",
+    api_key="anon-key",
+    access_token="user-jwt",
+)
 rows = client.table("users").select("id", "email").eq("is_active", True).execute()
 reveal_type(rows)  # list[Users_email_id]
-reveal_type(client.users().select("id").execute())  # list[Users_id]
-reveal_type(client.users().select("*").execute())  # list[UsersRow]
-# client.table("users").select("idd")  # mypy error: no matching overload
-# client.table("users").select("id", "email", "kind", "score")  # four columns: no overload
+one = client.users().select("id").single().execute()
+reveal_type(one)  # Users_id
+client.users().insert(UsersInsert(email="a@b.c", is_active=True)).execute()
+client.users().update(UsersUpdate(display_name="Ada")).eq("id", 1).execute()
+client.users().delete().eq("id", 1).execute()
+client.close()
 ```
 
-Four or more columns are rejected. Generating an overload for every order of four names grows as `n! / (n-4)!` per table, which is the wrong default. A later version can raise the cap without changing `execute()`, because the query is already generic over the row `TypedDict`.
+`api_key` is the anon key (`apikey` header). `access_token` is the end-user JWT (`Authorization: Bearer`). Omit `access_token` and the anon key is used for both, which is the public RLS case. Do not pass a service-role key.
+
+Columns that declare an OpenAPI `default` are optional on `Insert` models so the database can fill them. `--strict-insert` keeps those columns required. `Update` fields are always optional.
+
+`order`, `limit`, `offset`, `range`, and `single` are on the query. `single().execute()` returns one row instead of a list. `PostsQuery` and `UsersQuery` are the generic query classes.
+
+Four or more columns are not given overloads. The number of argument orders grows as `n! / (n-k)!`. The query is already generic over the row `TypedDict`, so the cap can move later without a new execution path.
 
 ## Comparison
 
@@ -71,27 +83,28 @@ Four or more columns are rejected. Generating an overload for every order of fou
 $ schema2client --help
 Usage: schema2client [OPTIONS] COMMAND [ARGS]...
 
-  Generate typed Python packages from PostgREST OpenAPI schemas.
+  Generate a typed PostgREST client package from an OpenAPI schema.
 
 Options:
   --help  Show this message and exit.
 
 Commands:
-  generate  Emit models, query builders, and HTTP clients from a schema...
+  generate  Write models, query builders, and Client / AsyncClient for a...
 ```
 
 ```text
 $ schema2client generate --help
 Usage: schema2client generate [OPTIONS]
 
-  Emit models, query builders, and HTTP clients from a schema file.
+  Write models, query builders, and Client / AsyncClient for a schema file.
 
 Options:
   --spec FILE      Path to a PostgREST OpenAPI JSON document.  [required]
-  --out DIRECTORY  Output directory for the generated package tree.
+  --out DIRECTORY  Directory to write the generated package into.  [required]
+  --package TEXT   Import name of the generated package (for example mydb).
                    [required]
-  --package TEXT   Python package name for generated code (for example
-                   ``mydb``).  [required]
+  --strict-insert  Keep OpenAPI required columns required on Insert models
+                   even when a default is present.
   --help           Show this message and exit.
 ```
 

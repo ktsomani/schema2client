@@ -45,6 +45,7 @@ def test_cli_generate_matches_fixture(tmp_path: Path) -> None:
         "client_sync.py",
         "client_async.py",
         "__init__.py",
+        "py.typed",
     ):
         generated = (out / "mydb" / name).read_text(encoding="utf-8")
         committed = (PACKAGE_DIR / name).read_text(encoding="utf-8")

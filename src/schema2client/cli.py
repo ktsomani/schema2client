@@ -12,7 +12,7 @@ from schema2client.parser import parse_spec_file
 
 @click.group()
 def main() -> None:
-    """Generate typed Python packages from PostgREST OpenAPI schemas."""
+    """Generate a typed PostgREST client package from an OpenAPI schema."""
 
 
 @main.command("generate")
@@ -26,20 +26,26 @@ def main() -> None:
     "--out",
     required=True,
     type=click.Path(path_type=Path, file_okay=False),
-    help="Output directory for the generated package tree.",
+    help="Directory to write the generated package into.",
 )
 @click.option(
     "--package",
     required=True,
     type=str,
-    help="Python package name for generated code (for example ``mydb``).",
+    help="Import name of the generated package (for example mydb).",
 )
-def generate(spec: Path, out: Path, package: str) -> None:
-    """Emit models, query builders, and HTTP clients from a schema file."""
+@click.option(
+    "--strict-insert",
+    is_flag=True,
+    default=False,
+    help="Keep OpenAPI required columns required on Insert models even when a default is present.",
+)
+def generate(spec: Path, out: Path, package: str, strict_insert: bool) -> None:
+    """Write models, query builders, and Client / AsyncClient for a schema file."""
     spec_bytes = spec.read_bytes()
     schema_hash = compute_schema_hash(spec_bytes)
     ir = parse_spec_file(spec)
-    emit_package(ir, out, package, schema_hash)
+    emit_package(ir, out, package, schema_hash, strict_insert=strict_insert)
 
 
 if __name__ == "__main__":

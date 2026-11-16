@@ -15,7 +15,7 @@ from .query_builder import (
     UsersQueryBuilder,
 )
 
-SCHEMA_HASH = "0c071ce8ed978870de92d6b47044fe223adf2e9951571c71a3645aa18e724e6d"
+SCHEMA_HASH = "d0dbf593c3e26ac9e782308c61047461502f296c1e60a2778b8d6044162365cf"
 
 __all__ = [
     "SCHEMA_HASH",

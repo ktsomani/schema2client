@@ -9,7 +9,7 @@ description = "Generate a fully typed Python client from a Supabase / PostgREST 
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
-authors = [{ name = "soman" }]
+authors = [{ name = "Kartik Somani" }]
 keywords = ["supabase", "postgrest", "openapi", "codegen", "pydantic", "mypy"]
 classifiers = [
   "Programming Language :: Python :: 3.11",
@@ -37,9 +37,9 @@ dev = [
 schema2client = "schema2client.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/soman/schema2client"
-Repository = "https://github.com/soman/schema2client"
-Issues = "https://github.com/soman/schema2client/issues"
+Homepage = "https://github.com/ktsomani/schema2client"
+Repository = "https://github.com/ktsomani/schema2client"
+Issues = "https://github.com/ktsomani/schema2client/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/schema2client"]

@@ -41,7 +41,7 @@ class {{ table.insert_class }}(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     {% for column in table.columns %}
-    {% if column.nullable %}
+    {% if column.insert_optional %}
     {{ column.name }}: {{ column.write_optional_type }} = None
     {% else %}
     {{ column.name }}: {{ column.write_required_type }}

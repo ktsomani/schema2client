@@ -88,7 +88,8 @@
         "id": {
           "type": "integer",
           "format": "integer",
-          "description": "Note:\nThis is a Primary Key.<pk/>"
+          "description": "Note:\nThis is a Primary Key.<pk/>",
+          "default": 0
         },
         "email": {
           "type": "string",
@@ -128,7 +129,8 @@
         },
         "created_at": {
           "type": "string",
-          "format": "timestamp without time zone"
+          "format": "timestamp without time zone",
+          "default": "now()"
         }
       }
     },

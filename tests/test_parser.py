@@ -18,6 +18,8 @@ def test_parse_fixture_users_columns() -> None:
 
     assert users.columns[0].name == "avatar"
     assert by_name["id"].nullable is False
+    assert by_name["id"].has_default is True
+    assert by_name["email"].has_default is False
     assert by_name["display_name"].nullable is True
     assert by_name["kind"].enum == ("member", "admin", "guest")
     assert by_name["tags"].array_item is not None

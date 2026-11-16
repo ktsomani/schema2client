@@ -33,6 +33,7 @@ class ModelColumn:
     filter_type: str
     nullable: bool
     has_enum: bool
+    insert_optional: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,7 +132,7 @@ def _select_overloads(
     return tuple(found)
 
 
-def _table_models(table: Table) -> TableModels:
+def _table_models(table: Table, *, strict_insert: bool = False) -> TableModels:
     prefix = _pascal_case(table.name)
     enums: dict[str, EnumDef] = {}
     columns: list[ModelColumn] = []
@@ -153,6 +154,7 @@ def _table_models(table: Table) -> TableModels:
                 filter_type=_filter_value_type(read_type),
                 nullable=column.nullable,
                 has_enum=bool(column.enum),
+                insert_optional=column.nullable or (column.has_default and not strict_insert),
             )
         )
 
@@ -235,8 +237,8 @@ def _format_python(source: str, *, filename: str = "models.py") -> str:
         temp_path.unlink(missing_ok=True)
 
 
-def _render_models(ir: SchemaIR) -> str:
-    tables = tuple(_table_models(table) for table in ir.tables)
+def _render_models(ir: SchemaIR, *, strict_insert: bool = False) -> str:
+    tables = tuple(_table_models(table, strict_insert=strict_insert) for table in ir.tables)
     stdlib_imports, typing_imports = _collect_imports(tables)
 
     env = _jinja_env()
@@ -251,9 +253,9 @@ def _render_models(ir: SchemaIR) -> str:
     return _format_python(rendered)
 
 
-def render_models(ir: SchemaIR) -> str:
+def render_models(ir: SchemaIR, *, strict_insert: bool = False) -> str:
     """Render ``models.py`` source for ``ir``."""
-    return _render_models(ir)
+    return _render_models(ir, strict_insert=strict_insert)
 
 
 def _render_query_builder(ir: SchemaIR) -> str:
@@ -288,10 +290,10 @@ def emit_query_builder(ir: SchemaIR, package_dir: Path) -> None:
     (package_dir / "query_builder.py").write_text(content, encoding="utf-8", newline="\n")
 
 
-def emit_models(ir: SchemaIR, package_dir: Path) -> None:
+def emit_models(ir: SchemaIR, package_dir: Path, *, strict_insert: bool = False) -> None:
     """Write ``models.py`` into ``package_dir``."""
     package_dir.mkdir(parents=True, exist_ok=True)
-    content = render_models(ir)
+    content = render_models(ir, strict_insert=strict_insert)
     (package_dir / "models.py").write_text(content, encoding="utf-8", newline="\n")
 
 
@@ -332,11 +334,18 @@ def _render_init(ir: SchemaIR, package_name: str, schema_hash: str) -> str:
     return _format_python(rendered, filename="__init__.py")
 
 
-def emit_package(ir: SchemaIR, out_dir: Path, package_name: str, schema_hash: str) -> None:
+def emit_package(
+    ir: SchemaIR,
+    out_dir: Path,
+    package_name: str,
+    schema_hash: str,
+    *,
+    strict_insert: bool = False,
+) -> None:
     """Write the full generated package (models, query builders, clients, ``SCHEMA_HASH``)."""
     package_dir = out_dir / package_name
     package_dir.mkdir(parents=True, exist_ok=True)
-    emit_models(ir, package_dir)
+    emit_models(ir, package_dir, strict_insert=strict_insert)
     emit_query_builder(ir, package_dir)
     (package_dir / "client_sync.py").write_text(
         render_client_sync(ir, package_name),
@@ -353,6 +362,7 @@ def emit_package(ir: SchemaIR, out_dir: Path, package_name: str, schema_hash: st
         encoding="utf-8",
         newline="\n",
     )
+    (package_dir / "py.typed").write_text("", encoding="utf-8", newline="\n")
 
 
 def emit_models_package(ir: SchemaIR, out_dir: Path, package_name: str) -> None:

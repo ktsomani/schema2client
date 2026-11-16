@@ -1565,10 +1565,10 @@ class UsersInsert(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     avatar: bytes | None = None
-    created_at: datetime.datetime
+    created_at: datetime.datetime | None = None
     display_name: str | None = None
     email: str
-    id: int
+    id: int | None = None
     is_active: bool
     kind: Users_PublicUserKindEnum | None = None
     metadata: dict[str, object] | None = None

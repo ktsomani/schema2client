@@ -128,4 +128,5 @@ def _column_from_property(name: str, prop: dict[str, object], *, nullable: bool)
         nullable=nullable,
         enum=enum,
         array_item=array_item,
+        has_default="default" in prop,
     )

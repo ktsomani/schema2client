@@ -24,6 +24,7 @@ class Column:
     nullable: bool
     enum: tuple[str, ...] = ()
     array_item: ArrayItem | None = None
+    has_default: bool = False
 
 
 @dataclass(frozen=True, slots=True)

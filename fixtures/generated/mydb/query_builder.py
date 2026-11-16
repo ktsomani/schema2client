@@ -12,7 +12,7 @@ import decimal
 import uuid
 from typing import ClassVar, Generic, Literal, Protocol, TypeVar, cast, overload
 
-from pydantic import TypeAdapter
+from pydantic import BaseModel, TypeAdapter
 
 from .models import (
     Posts_author_id,
@@ -107,7 +107,9 @@ from .models import (
     Posts_title,
     Posts_title_view_count,
     Posts_view_count,
+    PostsInsert,
     PostsRow,
+    PostsUpdate,
     Users_avatar,
     Users_avatar_created_at,
     Users_avatar_created_at_display_name,
@@ -283,7 +285,9 @@ from .models import (
     Users_score,
     Users_score_tags,
     Users_tags,
+    UsersInsert,
     UsersRow,
+    UsersUpdate,
 )
 
 _RowT = TypeVar("_RowT")
@@ -299,17 +303,31 @@ class _Select:
         return ",".join(self.columns)
 
 
+def _model_payload(model: BaseModel) -> dict[str, object]:
+    payload: dict[str, object] = {}
+    for name in model.model_fields_set:
+        payload[name] = cast(object, getattr(model, name))
+    return payload
+
+
 class _Queryable(Protocol):
     _filters: list[tuple[str, str, str]]
     _select: _Select
+    _mutation: tuple[str, dict[str, object]] | None
+    _on_conflict: str
+    _order: list[tuple[str, bool]]
+    _limit: int | None
+    _offset: int | None
+    _range: tuple[int, int] | None
+    _single: bool
 
 
 class _SyncHttpTransport(Protocol):
-    def fetch_rows(self, table: str, builder: _Queryable) -> list[object]: ...
+    def fetch(self, table: str, builder: _Queryable) -> object: ...
 
 
 class _AsyncHttpTransport(Protocol):
-    async def fetch_rows(self, table: str, builder: _Queryable) -> list[object]: ...
+    async def fetch(self, table: str, builder: _Queryable) -> object: ...
 
 
 class PostsQueryBuilder:
@@ -318,6 +336,13 @@ class PostsQueryBuilder:
     def __init__(self) -> None:
         self._filters: list[tuple[str, str, str]] = []
         self._select: _Select = _Select(("*",))
+        self._mutation: tuple[str, dict[str, object]] | None = None
+        self._on_conflict = ""
+        self._order: list[tuple[str, bool]] = []
+        self._limit: int | None = None
+        self._offset: int | None = None
+        self._range: tuple[int, int] | None = None
+        self._single = False
         self._sync_transport: _SyncHttpTransport | None = None
         self._async_transport: _AsyncHttpTransport | None = None
 
@@ -786,6 +811,104 @@ class PostsQueryBuilder:
     def is_(self, column: str, value: Literal["null", "not.null"]) -> PostsQueryBuilder:
         self._filters.append((column, "is", value))
         return self
+
+    @overload
+    def order(
+        self,
+        column: Literal["author_id"],
+        *,
+        desc: bool = False,
+    ) -> PostsQueryBuilder: ...
+    @overload
+    def order(
+        self,
+        column: Literal["body"],
+        *,
+        desc: bool = False,
+    ) -> PostsQueryBuilder: ...
+    @overload
+    def order(
+        self,
+        column: Literal["edited_on"],
+        *,
+        desc: bool = False,
+    ) -> PostsQueryBuilder: ...
+    @overload
+    def order(
+        self,
+        column: Literal["id"],
+        *,
+        desc: bool = False,
+    ) -> PostsQueryBuilder: ...
+    @overload
+    def order(
+        self,
+        column: Literal["published_at"],
+        *,
+        desc: bool = False,
+    ) -> PostsQueryBuilder: ...
+    @overload
+    def order(
+        self,
+        column: Literal["reminder_time"],
+        *,
+        desc: bool = False,
+    ) -> PostsQueryBuilder: ...
+    @overload
+    def order(
+        self,
+        column: Literal["title"],
+        *,
+        desc: bool = False,
+    ) -> PostsQueryBuilder: ...
+    @overload
+    def order(
+        self,
+        column: Literal["view_count"],
+        *,
+        desc: bool = False,
+    ) -> PostsQueryBuilder: ...
+    def order(self, column: str, *, desc: bool = False) -> PostsQueryBuilder:
+        self._order.append((column, desc))
+        return self
+
+    def limit(self, count: int) -> PostsQueryBuilder:
+        self._limit = count
+        return self
+
+    def offset(self, count: int) -> PostsQueryBuilder:
+        self._offset = count
+        return self
+
+    def range(self, start: int, end: int) -> PostsQueryBuilder:
+        self._range = (start, end)
+        return self
+
+    def insert(self, row: PostsInsert) -> PostsQuery[PostsRow]:
+        self._mutation = ("insert", _model_payload(row))
+        self._select = _Select(("*",))
+        return PostsQuery(self, _posts_star)
+
+    def upsert(
+        self,
+        row: PostsInsert,
+        *,
+        on_conflict: str = "",
+    ) -> PostsQuery[PostsRow]:
+        self._on_conflict = on_conflict
+        self._mutation = ("upsert", _model_payload(row))
+        self._select = _Select(("*",))
+        return PostsQuery(self, _posts_star)
+
+    def update(self, row: PostsUpdate) -> PostsQuery[PostsRow]:
+        self._mutation = ("update", _model_payload(row))
+        self._select = _Select(("*",))
+        return PostsQuery(self, _posts_star)
+
+    def delete(self) -> PostsQuery[PostsRow]:
+        self._mutation = ("delete", {})
+        self._select = _Select(("*",))
+        return PostsQuery(self, _posts_star)
 
     @overload
     def select(self, column: Literal["*"], /) -> PostsQuery[PostsRow]: ...
@@ -4398,13 +4521,90 @@ class PostsQuery(Generic[_RowT]):
         self._parent._filters.append((column, "is", value))
         return self
 
+    @overload
+    def order(
+        self,
+        column: Literal["author_id"],
+        *,
+        desc: bool = False,
+    ) -> PostsQuery[_RowT]: ...
+    @overload
+    def order(
+        self,
+        column: Literal["body"],
+        *,
+        desc: bool = False,
+    ) -> PostsQuery[_RowT]: ...
+    @overload
+    def order(
+        self,
+        column: Literal["edited_on"],
+        *,
+        desc: bool = False,
+    ) -> PostsQuery[_RowT]: ...
+    @overload
+    def order(
+        self,
+        column: Literal["id"],
+        *,
+        desc: bool = False,
+    ) -> PostsQuery[_RowT]: ...
+    @overload
+    def order(
+        self,
+        column: Literal["published_at"],
+        *,
+        desc: bool = False,
+    ) -> PostsQuery[_RowT]: ...
+    @overload
+    def order(
+        self,
+        column: Literal["reminder_time"],
+        *,
+        desc: bool = False,
+    ) -> PostsQuery[_RowT]: ...
+    @overload
+    def order(
+        self,
+        column: Literal["title"],
+        *,
+        desc: bool = False,
+    ) -> PostsQuery[_RowT]: ...
+    @overload
+    def order(
+        self,
+        column: Literal["view_count"],
+        *,
+        desc: bool = False,
+    ) -> PostsQuery[_RowT]: ...
+    def order(self, column: str, *, desc: bool = False) -> PostsQuery[_RowT]:
+        self._parent._order.append((column, desc))
+        return self
+
+    def limit(self, count: int) -> PostsQuery[_RowT]:
+        self._parent._limit = count
+        return self
+
+    def offset(self, count: int) -> PostsQuery[_RowT]:
+        self._parent._offset = count
+        return self
+
+    def range(self, start: int, end: int) -> PostsQuery[_RowT]:
+        self._parent._range = (start, end)
+        return self
+
+    def single(self) -> PostsSingle[_RowT]:
+        self._parent._single = True
+        return PostsSingle(self._parent, self._adapter)
+
     def execute(self) -> list[_RowT]:
         transport = self._parent._sync_transport
         if transport is None:
             empty: list[_RowT] = []
             return empty
-        raw = transport.fetch_rows(PostsQueryBuilder._table_name, self._parent)
-        parsed = cast(TypeAdapter[list[_RowT]], self._adapter).validate_python(raw)
+        raw = transport.fetch(PostsQueryBuilder._table_name, self._parent)
+        rows = raw if isinstance(raw, list) else [raw]
+        parsed = cast(TypeAdapter[list[_RowT]], self._adapter).validate_python(rows)
         return parsed
 
     async def execute_async(self) -> list[_RowT]:
@@ -4412,9 +4612,34 @@ class PostsQuery(Generic[_RowT]):
         if transport is None:
             empty: list[_RowT] = []
             return empty
-        raw = await transport.fetch_rows(PostsQueryBuilder._table_name, self._parent)
-        parsed = cast(TypeAdapter[list[_RowT]], self._adapter).validate_python(raw)
+        raw = await transport.fetch(PostsQueryBuilder._table_name, self._parent)
+        rows = raw if isinstance(raw, list) else [raw]
+        parsed = cast(TypeAdapter[list[_RowT]], self._adapter).validate_python(rows)
         return parsed
+
+
+class PostsSingle(Generic[_RowT]):
+    def __init__(self, parent: PostsQueryBuilder, adapter: object) -> None:
+        self._parent = parent
+        self._adapter = adapter
+
+    def execute(self) -> _RowT:
+        transport = self._parent._sync_transport
+        if transport is None:
+            msg = "query is not bound to a client"
+            raise RuntimeError(msg)
+        raw = transport.fetch(PostsQueryBuilder._table_name, self._parent)
+        parsed = cast(TypeAdapter[list[_RowT]], self._adapter).validate_python([raw])
+        return parsed[0]
+
+    async def execute_async(self) -> _RowT:
+        transport = self._parent._async_transport
+        if transport is None:
+            msg = "query is not bound to a client"
+            raise RuntimeError(msg)
+        raw = await transport.fetch(PostsQueryBuilder._table_name, self._parent)
+        parsed = cast(TypeAdapter[list[_RowT]], self._adapter).validate_python([raw])
+        return parsed[0]
 
 
 _posts_star: object = TypeAdapter(list[PostsRow])
@@ -4546,6 +4771,13 @@ class UsersQueryBuilder:
     def __init__(self) -> None:
         self._filters: list[tuple[str, str, str]] = []
         self._select: _Select = _Select(("*",))
+        self._mutation: tuple[str, dict[str, object]] | None = None
+        self._on_conflict = ""
+        self._order: list[tuple[str, bool]] = []
+        self._limit: int | None = None
+        self._offset: int | None = None
+        self._range: tuple[int, int] | None = None
+        self._single = False
         self._sync_transport: _SyncHttpTransport | None = None
         self._async_transport: _AsyncHttpTransport | None = None
 
@@ -5118,6 +5350,118 @@ class UsersQueryBuilder:
     def is_(self, column: str, value: Literal["null", "not.null"]) -> UsersQueryBuilder:
         self._filters.append((column, "is", value))
         return self
+
+    @overload
+    def order(
+        self,
+        column: Literal["avatar"],
+        *,
+        desc: bool = False,
+    ) -> UsersQueryBuilder: ...
+    @overload
+    def order(
+        self,
+        column: Literal["created_at"],
+        *,
+        desc: bool = False,
+    ) -> UsersQueryBuilder: ...
+    @overload
+    def order(
+        self,
+        column: Literal["display_name"],
+        *,
+        desc: bool = False,
+    ) -> UsersQueryBuilder: ...
+    @overload
+    def order(
+        self,
+        column: Literal["email"],
+        *,
+        desc: bool = False,
+    ) -> UsersQueryBuilder: ...
+    @overload
+    def order(
+        self,
+        column: Literal["id"],
+        *,
+        desc: bool = False,
+    ) -> UsersQueryBuilder: ...
+    @overload
+    def order(
+        self,
+        column: Literal["is_active"],
+        *,
+        desc: bool = False,
+    ) -> UsersQueryBuilder: ...
+    @overload
+    def order(
+        self,
+        column: Literal["kind"],
+        *,
+        desc: bool = False,
+    ) -> UsersQueryBuilder: ...
+    @overload
+    def order(
+        self,
+        column: Literal["metadata"],
+        *,
+        desc: bool = False,
+    ) -> UsersQueryBuilder: ...
+    @overload
+    def order(
+        self,
+        column: Literal["score"],
+        *,
+        desc: bool = False,
+    ) -> UsersQueryBuilder: ...
+    @overload
+    def order(
+        self,
+        column: Literal["tags"],
+        *,
+        desc: bool = False,
+    ) -> UsersQueryBuilder: ...
+    def order(self, column: str, *, desc: bool = False) -> UsersQueryBuilder:
+        self._order.append((column, desc))
+        return self
+
+    def limit(self, count: int) -> UsersQueryBuilder:
+        self._limit = count
+        return self
+
+    def offset(self, count: int) -> UsersQueryBuilder:
+        self._offset = count
+        return self
+
+    def range(self, start: int, end: int) -> UsersQueryBuilder:
+        self._range = (start, end)
+        return self
+
+    def insert(self, row: UsersInsert) -> UsersQuery[UsersRow]:
+        self._mutation = ("insert", _model_payload(row))
+        self._select = _Select(("*",))
+        return UsersQuery(self, _users_star)
+
+    def upsert(
+        self,
+        row: UsersInsert,
+        *,
+        on_conflict: str = "",
+    ) -> UsersQuery[UsersRow]:
+        self._on_conflict = on_conflict
+        self._mutation = ("upsert", _model_payload(row))
+        self._select = _Select(("*",))
+        return UsersQuery(self, _users_star)
+
+    def update(self, row: UsersUpdate) -> UsersQuery[UsersRow]:
+        self._mutation = ("update", _model_payload(row))
+        self._select = _Select(("*",))
+        return UsersQuery(self, _users_star)
+
+    def delete(self) -> UsersQuery[UsersRow]:
+        self._mutation = ("delete", {})
+        self._select = _Select(("*",))
+        return UsersQuery(self, _users_star)
 
     @overload
     def select(self, column: Literal["*"], /) -> UsersQuery[UsersRow]: ...
@@ -12156,13 +12500,104 @@ class UsersQuery(Generic[_RowT]):
         self._parent._filters.append((column, "is", value))
         return self
 
+    @overload
+    def order(
+        self,
+        column: Literal["avatar"],
+        *,
+        desc: bool = False,
+    ) -> UsersQuery[_RowT]: ...
+    @overload
+    def order(
+        self,
+        column: Literal["created_at"],
+        *,
+        desc: bool = False,
+    ) -> UsersQuery[_RowT]: ...
+    @overload
+    def order(
+        self,
+        column: Literal["display_name"],
+        *,
+        desc: bool = False,
+    ) -> UsersQuery[_RowT]: ...
+    @overload
+    def order(
+        self,
+        column: Literal["email"],
+        *,
+        desc: bool = False,
+    ) -> UsersQuery[_RowT]: ...
+    @overload
+    def order(
+        self,
+        column: Literal["id"],
+        *,
+        desc: bool = False,
+    ) -> UsersQuery[_RowT]: ...
+    @overload
+    def order(
+        self,
+        column: Literal["is_active"],
+        *,
+        desc: bool = False,
+    ) -> UsersQuery[_RowT]: ...
+    @overload
+    def order(
+        self,
+        column: Literal["kind"],
+        *,
+        desc: bool = False,
+    ) -> UsersQuery[_RowT]: ...
+    @overload
+    def order(
+        self,
+        column: Literal["metadata"],
+        *,
+        desc: bool = False,
+    ) -> UsersQuery[_RowT]: ...
+    @overload
+    def order(
+        self,
+        column: Literal["score"],
+        *,
+        desc: bool = False,
+    ) -> UsersQuery[_RowT]: ...
+    @overload
+    def order(
+        self,
+        column: Literal["tags"],
+        *,
+        desc: bool = False,
+    ) -> UsersQuery[_RowT]: ...
+    def order(self, column: str, *, desc: bool = False) -> UsersQuery[_RowT]:
+        self._parent._order.append((column, desc))
+        return self
+
+    def limit(self, count: int) -> UsersQuery[_RowT]:
+        self._parent._limit = count
+        return self
+
+    def offset(self, count: int) -> UsersQuery[_RowT]:
+        self._parent._offset = count
+        return self
+
+    def range(self, start: int, end: int) -> UsersQuery[_RowT]:
+        self._parent._range = (start, end)
+        return self
+
+    def single(self) -> UsersSingle[_RowT]:
+        self._parent._single = True
+        return UsersSingle(self._parent, self._adapter)
+
     def execute(self) -> list[_RowT]:
         transport = self._parent._sync_transport
         if transport is None:
             empty: list[_RowT] = []
             return empty
-        raw = transport.fetch_rows(UsersQueryBuilder._table_name, self._parent)
-        parsed = cast(TypeAdapter[list[_RowT]], self._adapter).validate_python(raw)
+        raw = transport.fetch(UsersQueryBuilder._table_name, self._parent)
+        rows = raw if isinstance(raw, list) else [raw]
+        parsed = cast(TypeAdapter[list[_RowT]], self._adapter).validate_python(rows)
         return parsed
 
     async def execute_async(self) -> list[_RowT]:
@@ -12170,9 +12605,34 @@ class UsersQuery(Generic[_RowT]):
         if transport is None:
             empty: list[_RowT] = []
             return empty
-        raw = await transport.fetch_rows(UsersQueryBuilder._table_name, self._parent)
-        parsed = cast(TypeAdapter[list[_RowT]], self._adapter).validate_python(raw)
+        raw = await transport.fetch(UsersQueryBuilder._table_name, self._parent)
+        rows = raw if isinstance(raw, list) else [raw]
+        parsed = cast(TypeAdapter[list[_RowT]], self._adapter).validate_python(rows)
         return parsed
+
+
+class UsersSingle(Generic[_RowT]):
+    def __init__(self, parent: UsersQueryBuilder, adapter: object) -> None:
+        self._parent = parent
+        self._adapter = adapter
+
+    def execute(self) -> _RowT:
+        transport = self._parent._sync_transport
+        if transport is None:
+            msg = "query is not bound to a client"
+            raise RuntimeError(msg)
+        raw = transport.fetch(UsersQueryBuilder._table_name, self._parent)
+        parsed = cast(TypeAdapter[list[_RowT]], self._adapter).validate_python([raw])
+        return parsed[0]
+
+    async def execute_async(self) -> _RowT:
+        transport = self._parent._async_transport
+        if transport is None:
+            msg = "query is not bound to a client"
+            raise RuntimeError(msg)
+        raw = await transport.fetch(UsersQueryBuilder._table_name, self._parent)
+        parsed = cast(TypeAdapter[list[_RowT]], self._adapter).validate_python([raw])
+        return parsed[0]
 
 
 _users_star: object = TypeAdapter(list[UsersRow])
