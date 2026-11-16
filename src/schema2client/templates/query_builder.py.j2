@@ -1,30 +1,33 @@
-"""Typed PostgREST query builders (single-column select narrowing)."""
+"""Typed PostgREST query builders.
+
+``select`` accepts ``"*"`` or 1-3 column names. Every argument order is an
+overload. Filters after ``select`` return the same generic query, so
+``.execute()`` stays narrowed to that projection.
+"""
 
 from __future__ import annotations
 
 {% for module in stdlib_imports %}
 import {{ module }}
 {% endfor %}
-from typing import ClassVar, Literal, Protocol, overload
+from typing import ClassVar, Generic, Literal, Protocol, TypeVar, cast, overload
 
 from pydantic import TypeAdapter
 
 from .models import (
-{% for table in tables -%}
-    {% for column in table.columns %}
-    {{ col_td_name(table.prefix, column.name) }},
-    {% endfor %}
+{% for table in tables %}
     {{ table.row_class }},
-{% endfor -%}
+    {% for projection in table.projections %}
+    {{ projection.class_name }},
+    {% endfor %}
+{% endfor %}
 )
+
+_RowT = TypeVar("_RowT")
 
 
 class _Select:
-    """Projection passed to PostgREST.
-
-    v0 stores one column (or ``"*"``). ``columns`` is a tuple so a later
-    multi-column ``select`` can append names without changing ``execute``.
-    """
+    """Columns sent as PostgREST ``select``. Order is the call order."""
 
     def __init__(self, columns: tuple[str, ...]) -> None:
         self.columns = columns
@@ -46,6 +49,124 @@ class _AsyncHttpTransport(Protocol):
     async def fetch_rows(self, table: str, builder: _Queryable) -> list[object]: ...
 
 
+{% macro filter_methods(table, ret, store) %}
+{% for column in table.columns %}
+    @overload
+    def eq(
+        self,
+        column: Literal["{{ column.name }}"],
+        value: {{ column.filter_type }},
+    ) -> {{ ret }}: ...
+{% endfor %}
+    def eq(self, column: str, value: object) -> {{ ret }}:
+        {{ store }}._filters.append((column, "eq", {{ store }}._encode(value)))
+        return self
+
+{% for column in table.columns %}
+    @overload
+    def neq(
+        self,
+        column: Literal["{{ column.name }}"],
+        value: {{ column.filter_type }},
+    ) -> {{ ret }}: ...
+{% endfor %}
+    def neq(self, column: str, value: object) -> {{ ret }}:
+        {{ store }}._filters.append((column, "neq", {{ store }}._encode(value)))
+        return self
+
+{% for column in table.columns %}
+    @overload
+    def gt(
+        self,
+        column: Literal["{{ column.name }}"],
+        value: {{ column.filter_type }},
+    ) -> {{ ret }}: ...
+{% endfor %}
+    def gt(self, column: str, value: object) -> {{ ret }}:
+        {{ store }}._filters.append((column, "gt", {{ store }}._encode(value)))
+        return self
+
+{% for column in table.columns %}
+    @overload
+    def gte(
+        self,
+        column: Literal["{{ column.name }}"],
+        value: {{ column.filter_type }},
+    ) -> {{ ret }}: ...
+{% endfor %}
+    def gte(self, column: str, value: object) -> {{ ret }}:
+        {{ store }}._filters.append((column, "gte", {{ store }}._encode(value)))
+        return self
+
+{% for column in table.columns %}
+    @overload
+    def lt(
+        self,
+        column: Literal["{{ column.name }}"],
+        value: {{ column.filter_type }},
+    ) -> {{ ret }}: ...
+{% endfor %}
+    def lt(self, column: str, value: object) -> {{ ret }}:
+        {{ store }}._filters.append((column, "lt", {{ store }}._encode(value)))
+        return self
+
+{% for column in table.columns %}
+    @overload
+    def lte(
+        self,
+        column: Literal["{{ column.name }}"],
+        value: {{ column.filter_type }},
+    ) -> {{ ret }}: ...
+{% endfor %}
+    def lte(self, column: str, value: object) -> {{ ret }}:
+        {{ store }}._filters.append((column, "lte", {{ store }}._encode(value)))
+        return self
+
+{% for column in table.columns %}
+    @overload
+    def like(self, column: Literal["{{ column.name }}"], value: str) -> {{ ret }}: ...
+{% endfor %}
+    def like(self, column: str, value: str) -> {{ ret }}:
+        {{ store }}._filters.append((column, "like", value))
+        return self
+
+{% for column in table.columns %}
+    @overload
+    def ilike(self, column: Literal["{{ column.name }}"], value: str) -> {{ ret }}: ...
+{% endfor %}
+    def ilike(self, column: str, value: str) -> {{ ret }}:
+        {{ store }}._filters.append((column, "ilike", value))
+        return self
+
+{% for column in table.columns %}
+    @overload
+    def in_(
+        self,
+        column: Literal["{{ column.name }}"],
+        value: list[{{ column.filter_type }}],
+    ) -> {{ ret }}: ...
+{% endfor %}
+    def in_(self, column: str, value: object) -> {{ ret }}:
+        if isinstance(value, list):
+            encoded = ",".join({{ store }}._encode(item) for item in value)
+        else:
+            encoded = {{ store }}._encode(value)
+        {{ store }}._filters.append((column, "in", encoded))
+        return self
+
+{% for column in table.columns %}
+    @overload
+    def is_(
+        self,
+        column: Literal["{{ column.name }}"],
+        value: Literal["null"] | Literal["not.null"],
+    ) -> {{ ret }}: ...
+{% endfor %}
+    def is_(self, column: str, value: Literal["null", "not.null"]) -> {{ ret }}:
+        {{ store }}._filters.append((column, "is", value))
+        return self
+{% endmacro %}
+
 {% for table in tables %}
 class {{ table.prefix }}QueryBuilder:
     _table_name: ClassVar[str] = "{{ table.table_name }}"
@@ -62,198 +183,65 @@ class {{ table.prefix }}QueryBuilder:
             return "true" if value else "false"
         return str(value)
 
-{% for column in table.columns %}
+{{ filter_methods(table, table.prefix ~ "QueryBuilder", "self") }}
     @overload
-    def eq(
+    def select(self, column: Literal["*"], /) -> {{ table.prefix }}Query[{{ table.row_class }}]: ...
+{% for spec in table.select_overloads %}
+    @overload
+    def select(
         self,
-        column: Literal["{{ column.name }}"],
-        value: {{ column.filter_type }},
-    ) -> {{ table.prefix }}QueryBuilder: ...
+        {% for name in spec.arg_names %}
+        column_{{ loop.index }}: Literal["{{ name }}"],
+        {% endfor %}
+        /,
+    ) -> {{ table.prefix }}Query[{{ spec.class_name }}]: ...
 {% endfor %}
-    def eq(self, column: str, value: object) -> {{ table.prefix }}QueryBuilder:
-        self._filters.append((column, "eq", self._encode(value)))
-        return self
-
-{% for column in table.columns %}
-    @overload
-    def neq(
-        self,
-        column: Literal["{{ column.name }}"],
-        value: {{ column.filter_type }},
-    ) -> {{ table.prefix }}QueryBuilder: ...
-{% endfor %}
-    def neq(self, column: str, value: object) -> {{ table.prefix }}QueryBuilder:
-        self._filters.append((column, "neq", self._encode(value)))
-        return self
-
-{% for column in table.columns %}
-    @overload
-    def gt(
-        self,
-        column: Literal["{{ column.name }}"],
-        value: {{ column.filter_type }},
-    ) -> {{ table.prefix }}QueryBuilder: ...
-{% endfor %}
-    def gt(self, column: str, value: object) -> {{ table.prefix }}QueryBuilder:
-        self._filters.append((column, "gt", self._encode(value)))
-        return self
-
-{% for column in table.columns %}
-    @overload
-    def gte(
-        self,
-        column: Literal["{{ column.name }}"],
-        value: {{ column.filter_type }},
-    ) -> {{ table.prefix }}QueryBuilder: ...
-{% endfor %}
-    def gte(self, column: str, value: object) -> {{ table.prefix }}QueryBuilder:
-        self._filters.append((column, "gte", self._encode(value)))
-        return self
-
-{% for column in table.columns %}
-    @overload
-    def lt(
-        self,
-        column: Literal["{{ column.name }}"],
-        value: {{ column.filter_type }},
-    ) -> {{ table.prefix }}QueryBuilder: ...
-{% endfor %}
-    def lt(self, column: str, value: object) -> {{ table.prefix }}QueryBuilder:
-        self._filters.append((column, "lt", self._encode(value)))
-        return self
-
-{% for column in table.columns %}
-    @overload
-    def lte(
-        self,
-        column: Literal["{{ column.name }}"],
-        value: {{ column.filter_type }},
-    ) -> {{ table.prefix }}QueryBuilder: ...
-{% endfor %}
-    def lte(self, column: str, value: object) -> {{ table.prefix }}QueryBuilder:
-        self._filters.append((column, "lte", self._encode(value)))
-        return self
-
-{% for column in table.columns %}
-    @overload
-    def like(
-        self,
-        column: Literal["{{ column.name }}"],
-        value: str,
-    ) -> {{ table.prefix }}QueryBuilder: ...
-{% endfor %}
-    def like(self, column: str, value: str) -> {{ table.prefix }}QueryBuilder:
-        self._filters.append((column, "like", value))
-        return self
-
-{% for column in table.columns %}
-    @overload
-    def ilike(
-        self,
-        column: Literal["{{ column.name }}"],
-        value: str,
-    ) -> {{ table.prefix }}QueryBuilder: ...
-{% endfor %}
-    def ilike(self, column: str, value: str) -> {{ table.prefix }}QueryBuilder:
-        self._filters.append((column, "ilike", value))
-        return self
-
-{% for column in table.columns %}
-    @overload
-    def in_(
-        self,
-        column: Literal["{{ column.name }}"],
-        value: list[{{ column.filter_type }}],
-    ) -> {{ table.prefix }}QueryBuilder: ...
-{% endfor %}
-    def in_(self, column: str, value: object) -> {{ table.prefix }}QueryBuilder:
-        if isinstance(value, list):
-            encoded = ",".join(self._encode(item) for item in value)
-        else:
-            encoded = self._encode(value)
-        self._filters.append((column, "in", encoded))
-        return self
-
-{% for column in table.columns %}
-    @overload
-    def is_(
-        self,
-        column: Literal["{{ column.name }}"],
-        value: Literal["null"] | Literal["not.null"],
-    ) -> {{ table.prefix }}QueryBuilder: ...
-{% endfor %}
-    def is_(self, column: str, value: Literal["null", "not.null"]) -> {{ table.prefix }}QueryBuilder:
-        self._filters.append((column, "is", value))
-        return self
-
-    @overload
-    def select(self, column: Literal["*"]) -> {{ table.prefix }}Query_star: ...
-{% for column in table.columns %}
-    @overload
-    def select(self, column: Literal["{{ column.name }}"]) -> {{ table.prefix }}Query_{{ column.name }}: ...
-{% endfor %}
-    def select(self, column: str) -> object:
-        if column == "*":
+    def select(self, *columns: str) -> object:
+        if columns == ("*",):
             self._select = _Select(("*",))
-            return {{ table.prefix }}Query_star(self)
-{% for column in table.columns %}
-        if column == "{{ column.name }}":
-            self._select = _Select(("{{ column.name }}",))
-            return {{ table.prefix }}Query_{{ column.name }}(self)
-{% endfor %}
-        msg = f"unknown column {column!r}"
-        raise ValueError(msg)
+            return {{ table.prefix }}Query(self, _{{ table.table_name }}_star)
+        if len(columns) < 1 or len(columns) > 3 or len(set(columns)) != len(columns):
+            msg = "select() accepts '*' or 1 to 3 distinct columns"
+            raise ValueError(msg)
+        key = tuple(sorted(columns))
+        adapter = _{{ table.table_name }}_adapters.get(key)
+        if adapter is None:
+            msg = f"unknown columns {columns!r}"
+            raise ValueError(msg)
+        self._select = _Select(tuple(columns))
+        return {{ table.prefix }}Query(self, adapter)
 
 
-class {{ table.prefix }}Query_star:
-    def __init__(self, parent: {{ table.prefix }}QueryBuilder) -> None:
+class {{ table.prefix }}Query(Generic[_RowT]):
+    def __init__(self, parent: {{ table.prefix }}QueryBuilder, adapter: object) -> None:
         self._parent = parent
+        self._adapter = adapter
 
-    def execute(self) -> list[{{ table.row_class }}]:
+{{ filter_methods(table, table.prefix ~ "Query[_RowT]", "self._parent") }}
+    def execute(self) -> list[_RowT]:
         transport = self._parent._sync_transport
         if transport is None:
-            return []
+            empty: list[_RowT] = []
+            return empty
         raw = transport.fetch_rows({{ table.prefix }}QueryBuilder._table_name, self._parent)
-        return _list_adapter_{{ table.table_name }}_star.validate_python(raw)
+        parsed = cast(TypeAdapter[list[_RowT]], self._adapter).validate_python(raw)
+        return parsed
 
-    async def execute_async(self) -> list[{{ table.row_class }}]:
+    async def execute_async(self) -> list[_RowT]:
         transport = self._parent._async_transport
         if transport is None:
-            return []
+            empty: list[_RowT] = []
+            return empty
         raw = await transport.fetch_rows({{ table.prefix }}QueryBuilder._table_name, self._parent)
-        return _list_adapter_{{ table.table_name }}_star.validate_python(raw)
+        parsed = cast(TypeAdapter[list[_RowT]], self._adapter).validate_python(raw)
+        return parsed
 
 
-{% for column in table.columns %}
-class {{ table.prefix }}Query_{{ column.name }}:
-    def __init__(self, parent: {{ table.prefix }}QueryBuilder) -> None:
-        self._parent = parent
-
-    def execute(self) -> list[{{ col_td_name(table.prefix, column.name) }}]:
-        transport = self._parent._sync_transport
-        if transport is None:
-            return []
-        raw = transport.fetch_rows({{ table.prefix }}QueryBuilder._table_name, self._parent)
-        return _list_adapter_{{ table.table_name }}_{{ column.name }}.validate_python(raw)
-
-    async def execute_async(self) -> list[{{ col_td_name(table.prefix, column.name) }}]:
-        transport = self._parent._async_transport
-        if transport is None:
-            return []
-        raw = await transport.fetch_rows({{ table.prefix }}QueryBuilder._table_name, self._parent)
-        return _list_adapter_{{ table.table_name }}_{{ column.name }}.validate_python(raw)
-
-
+_{{ table.table_name }}_star: object = TypeAdapter(list[{{ table.row_class }}])
+_{{ table.table_name }}_adapters: dict[tuple[str, ...], object] = {
+{% for projection in table.projections %}
+    {{ projection.key_src }}: TypeAdapter(list[{{ projection.class_name }}]),
 {% endfor %}
-{% endfor %}
+}
 
-{% for table in tables %}
-_list_adapter_{{ table.table_name }}_star: TypeAdapter[list[{{ table.row_class }}]] = TypeAdapter(
-    list[{{ table.row_class }}]
-)
-{% for column in table.columns %}
-_list_adapter_{{ table.table_name }}_{{ column.name }}: TypeAdapter[
-    list[{{ col_td_name(table.prefix, column.name) }}]
-] = TypeAdapter(list[{{ col_td_name(table.prefix, column.name) }}])
-{% endfor %}
 {% endfor %}

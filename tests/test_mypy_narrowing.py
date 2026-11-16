@@ -33,6 +33,7 @@ def test_mypy_narrowing_reveal() -> None:
     assert completed.returncode == 0, completed.stdout + completed.stderr
     out = completed.stdout + completed.stderr
     assert "Users_id" in out
+    assert "Users_email_id" in out
     assert "UsersRow" in out
     assert "list[dict" not in out
 

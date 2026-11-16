@@ -1,4 +1,4 @@
-"""Static typing checks for single-column select narrowing (mypy only)."""
+"""Static typing checks for select narrowing (mypy only)."""
 
 from __future__ import annotations
 
@@ -15,3 +15,13 @@ def narrowed_select_id() -> None:
 def narrowed_select_star() -> None:
     qb = UsersQueryBuilder()
     reveal_type(qb.select("*").execute())
+
+
+def narrowed_select_two_columns() -> None:
+    qb = UsersQueryBuilder()
+    reveal_type(qb.select("id", "email").eq("is_active", True).execute())
+
+
+def narrowed_select_reversed_pair() -> None:
+    qb = UsersQueryBuilder()
+    reveal_type(qb.select("email", "id").execute())

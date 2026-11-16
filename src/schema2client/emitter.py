@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
+from itertools import combinations, permutations
 from pathlib import Path
 
 import jinja2
@@ -35,6 +36,23 @@ class ModelColumn:
 
 
 @dataclass(frozen=True, slots=True)
+class Projection:
+    """One read TypedDict for a column combination (1-3 columns)."""
+
+    class_name: str
+    columns: tuple[ModelColumn, ...]
+    key_src: str
+
+
+@dataclass(frozen=True, slots=True)
+class SelectOverload:
+    """One ``select`` overload. Argument order follows the call, not the type name."""
+
+    arg_names: tuple[str, ...]
+    class_name: str
+
+
+@dataclass(frozen=True, slots=True)
 class TableModels:
     table_name: str
     prefix: str
@@ -43,6 +61,8 @@ class TableModels:
     update_class: str
     columns: tuple[ModelColumn, ...]
     enums: tuple[EnumDef, ...]
+    projections: tuple[Projection, ...]
+    select_overloads: tuple[SelectOverload, ...]
 
 
 def _pascal_case(name: str) -> str:
@@ -67,6 +87,48 @@ def _write_inner_type(column: Column, table: Table) -> str:
     if inner.endswith(" | None"):
         return inner[: -len(" | None")]
     return inner
+
+
+def _projection_key_src(names: tuple[str, ...]) -> str:
+    parts = ", ".join(repr(name) for name in names)
+    if len(names) == 1:
+        return f"({parts},)"
+    return f"({parts})"
+
+
+def _projections(prefix: str, columns: tuple[ModelColumn, ...]) -> tuple[Projection, ...]:
+    found: list[Projection] = []
+    for width in (1, 2, 3):
+        for combo in combinations(columns, width):
+            ordered = tuple(sorted(combo, key=lambda column: column.name))
+            names = tuple(column.name for column in ordered)
+            found.append(
+                Projection(
+                    class_name=f"{prefix}_{'_'.join(names)}",
+                    columns=combo,
+                    key_src=_projection_key_src(names),
+                )
+            )
+    return tuple(found)
+
+
+def _select_overloads(
+    columns: tuple[ModelColumn, ...],
+    projections: tuple[Projection, ...],
+) -> tuple[SelectOverload, ...]:
+    by_key = {projection.key_src: projection for projection in projections}
+    found: list[SelectOverload] = []
+    for width in (1, 2, 3):
+        for perm in permutations(columns, width):
+            names = tuple(column.name for column in perm)
+            key = _projection_key_src(tuple(sorted(names)))
+            found.append(
+                SelectOverload(
+                    arg_names=names,
+                    class_name=by_key[key].class_name,
+                )
+            )
+    return tuple(found)
 
 
 def _table_models(table: Table) -> TableModels:
@@ -94,14 +156,18 @@ def _table_models(table: Table) -> TableModels:
             )
         )
 
+    column_tuple = tuple(columns)
+    projections = _projections(prefix, column_tuple)
     return TableModels(
         table_name=table.name,
         prefix=prefix,
         row_class=f"{prefix}Row",
         insert_class=f"{prefix}Insert",
         update_class=f"{prefix}Update",
-        columns=tuple(columns),
+        columns=column_tuple,
         enums=tuple(sorted(enums.values(), key=lambda item: item.name)),
+        projections=projections,
+        select_overloads=_select_overloads(column_tuple, projections),
     )
 
 

@@ -6,13 +6,13 @@
 [![ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![ci](https://github.com/soman/schema2client/actions/workflows/ci.yml/badge.svg)](https://github.com/soman/schema2client/actions/workflows/ci.yml)
 
-Generate a fully typed Python **types layer** from a Supabase / PostgREST OpenAPI schema (`GET /rest/v1/`).
+Generate a typed PostgREST **client package** from an OpenAPI schema (`GET /rest/v1/`).
 
-Supabase documents `supabase gen types typescript` and, in newer CLI releases, `supabase gen types --lang=python` from **database introspection**. The official runtime stack (`supabase-py` → `postgrest-py`) still returns `dict` / `list[dict]` from `.execute()` unless you wrap rows yourself. **schema2client** reads a **PostgREST OpenAPI document** and emits a Python package: `TypedDict` read shapes, Pydantic write models, query builders, and `Client` / `AsyncClient` classes that delegate HTTP to `postgrest-py`. Single-column `select()` narrowing makes column typos a `mypy --strict` error.
+Supabase documents `supabase gen types typescript` and, in newer CLI releases, `supabase gen types --lang=python` from **database introspection**. The official runtime stack (`supabase-py` → `postgrest-py`) still returns `dict` / `list[dict]` from `.execute()` unless you wrap rows yourself. **schema2client** reads a **PostgREST OpenAPI document** and emits a package you instantiate: `Client` and `AsyncClient`, query builders, `TypedDict` row projections, and Pydantic write models. HTTP calls go through `postgrest-py`. `select("id")`, `select("id", "email")`, and `select("id", "email", "kind")` each return a different row type, and filters after `select` keep that type.
 
 ## What this is — and what it isn't
 
-**schema2client generates a package you import.** `Client` and `AsyncClient` wrap `postgrest-py` (the official PostgREST HTTP client). Query builders on that client are the interface for table reads: filters and single-column `select()` are checked by mypy. It does not implement Supabase auth, realtime, or storage, and it does not replace `supabase-py` for those APIs.
+**schema2client generates the client you call.** `Client` and `AsyncClient` are the entry points. Query builders hang off `table("users")` or `users()`. Underneath, requests are performed by `postgrest-py` rather than a second HTTP stack. Supabase auth, realtime, and storage are not generated.
 
 ## The receipt
 
@@ -29,21 +29,23 @@ $ echo "zero type: ignore in generated output"
 zero type: ignore in generated output
 ```
 
-## Column narrowing (v0)
+## Column narrowing
 
-Single-column `select()` only (`@overload` per column, not TypeVars):
+`select` takes `"*"` or **one to three** column names as separate arguments. Each argument order is its own overload. The result type is one `TypedDict` per column set (names sorted in the class name), so `select("id", "email")` and `select("email", "id")` are both `list[Users_email_id]`. `.eq()` after `select` returns that same query, so `.execute()` stays narrowed.
 
 ```python
 from mydb import Client
 
 client = Client("https://example.supabase.co/rest/v1", "anon-key")
-rows = client.table("users").eq("email", "user@example.com").select("id").execute()
-reveal_type(rows)  # list[Users_id]
+rows = client.table("users").select("id", "email").eq("is_active", True).execute()
+reveal_type(rows)  # list[Users_email_id]
+reveal_type(client.users().select("id").execute())  # list[Users_id]
 reveal_type(client.users().select("*").execute())  # list[UsersRow]
 # client.table("users").select("idd")  # mypy error: no matching overload
+# client.table("users").select("id", "email", "kind", "score")  # four columns: no overload
 ```
 
-Multi-column `.select("id, email")` is **deliberately not implemented** in v0: Python has no template-literal types; combinatorial `@overload` sets are exponential and a curated subset would lie about coverage.
+Four or more columns are rejected. Generating an overload for every order of four names grows as `n! / (n-4)!` per table, which is the wrong default. A later version can raise the cap without changing `execute()`, because the query is already generic over the row `TypedDict`.
 
 ## Comparison
 
@@ -122,8 +124,8 @@ Use the **anon / public** key in examples only. Do not commit or pass service-ro
 ## Roadmap
 
 - `--source mgmt` for Supabase management API OpenAPI (not v0; v0 parses `definitions` / `paths` from a PostgREST export).
-- `--url` to fetch root OpenAPI in the CLI (not v0).
-- Multi-column `select()` narrowing: **not planned for v0** — see [Column narrowing](#column-narrowing-v0).
+- `--url` to fetch root OpenAPI in the CLI (not implemented).
+- `select` of four or more columns (the query type is already generic; the overload cap is 3).
 
 ## Versioning and stability
 

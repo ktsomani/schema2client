@@ -30,9 +30,11 @@ class {{ table.row_class }}(TypedDict):
     {{ column.name }}: {{ column.read_type }}
     {% endfor %}
 
-{% for column in table.columns %}
-class {{ col_td_name(table.prefix, column.name) }}(TypedDict):
+{% for projection in table.projections %}
+class {{ projection.class_name }}(TypedDict):
+    {% for column in projection.columns %}
     {{ column.name }}: {{ column.read_type }}
+    {% endfor %}
 
 {% endfor %}
 class {{ table.insert_class }}(BaseModel):
