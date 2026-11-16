@@ -234,18 +234,14 @@ def compute_schema_hash(spec_bytes: bytes) -> str:
     return hashlib.sha256(spec_bytes).hexdigest()
 
 
-def _package_pascal(package_name: str) -> str:
-    return _pascal_case(package_name)
-
-
 def _render_client(ir: SchemaIR, package_name: str, *, async_mode: bool) -> str:
+    del package_name
     tables = tuple(_table_models(table) for table in ir.tables)
-    package_pascal = _package_pascal(package_name)
     template = _jinja_env().get_template("client.py.j2")
     rendered = template.render(
         tables=tables,
         async_mode=async_mode,
-        client_class=f"{package_pascal}{'Async' if async_mode else 'Sync'}Client",
+        client_class="AsyncClient" if async_mode else "Client",
     )
     filename = "client_async.py" if async_mode else "client_sync.py"
     return _format_python(rendered, filename=filename)
@@ -259,13 +255,13 @@ def render_client_async(ir: SchemaIR, package_name: str) -> str:
     return _render_client(ir, package_name, async_mode=True)
 
 
-def _render_init(package_name: str, schema_hash: str) -> str:
-    package_pascal = _package_pascal(package_name)
+def _render_init(ir: SchemaIR, package_name: str, schema_hash: str) -> str:
+    tables = tuple(_table_models(table) for table in ir.tables)
     template = _jinja_env().get_template("__init__.py.j2")
     rendered = template.render(
         package_name=package_name,
-        package_pascal=package_pascal,
         schema_hash=schema_hash,
+        tables=tables,
     )
     return _format_python(rendered, filename="__init__.py")
 
@@ -287,7 +283,7 @@ def emit_package(ir: SchemaIR, out_dir: Path, package_name: str, schema_hash: st
         newline="\n",
     )
     (package_dir / "__init__.py").write_text(
-        _render_init(package_name, schema_hash),
+        _render_init(ir, package_name, schema_hash),
         encoding="utf-8",
         newline="\n",
     )

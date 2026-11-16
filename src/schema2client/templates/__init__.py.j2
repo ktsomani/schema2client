@@ -1,15 +1,30 @@
-"""Generated PostgREST types package for ``{{ package_name }}``."""
+"""Generated typed PostgREST package for ``{{ package_name }}``."""
 
-from . import models, query_builder
-from .client_async import {{ package_pascal }}AsyncClient
-from .client_sync import {{ package_pascal }}SyncClient
+from .client_async import AsyncClient
+from .client_sync import Client
+from .models import (
+{% for table in tables %}
+    {{ table.insert_class }},
+    {{ table.row_class }},
+    {{ table.update_class }},
+{% endfor %}
+)
+from .query_builder import (
+{% for table in tables %}
+    {{ table.prefix }}QueryBuilder,
+{% endfor %}
+)
 
 SCHEMA_HASH = "{{ schema_hash }}"
 
 __all__ = [
     "SCHEMA_HASH",
-    "{{ package_pascal }}AsyncClient",
-    "{{ package_pascal }}SyncClient",
-    "models",
-    "query_builder",
+    "AsyncClient",
+    "Client",
+{% for table in tables %}
+    "{{ table.insert_class }}",
+    "{{ table.prefix }}QueryBuilder",
+    "{{ table.row_class }}",
+    "{{ table.update_class }}",
+{% endfor %}
 ]

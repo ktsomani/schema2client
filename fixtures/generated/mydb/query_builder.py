@@ -33,9 +33,23 @@ from .models import (
 )
 
 
+class _Select:
+    """Projection passed to PostgREST.
+
+    v0 stores one column (or ``"*"``). ``columns`` is a tuple so a later
+    multi-column ``select`` can append names without changing ``execute``.
+    """
+
+    def __init__(self, columns: tuple[str, ...]) -> None:
+        self.columns = columns
+
+    def query(self) -> str:
+        return ",".join(self.columns)
+
+
 class _Queryable(Protocol):
     _filters: list[tuple[str, str, str]]
-    _select: str
+    _select: _Select
 
 
 class _SyncHttpTransport(Protocol):
@@ -46,24 +60,12 @@ class _AsyncHttpTransport(Protocol):
     async def fetch_rows(self, table: str, builder: _Queryable) -> list[object]: ...
 
 
-def _postgrest_params(builder: _Queryable) -> dict[str, str]:
-    params: dict[str, str] = {"select": builder._select}
-    for column, op, value in builder._filters:
-        if op == "is":
-            params[column] = f"is.{value}"
-        elif op == "in":
-            params[column] = f"in.({value})"
-        else:
-            params[column] = f"{op}.{value}"
-    return params
-
-
 class PostsQueryBuilder:
     _table_name: ClassVar[str] = "posts"
 
     def __init__(self) -> None:
         self._filters: list[tuple[str, str, str]] = []
-        self._select: str = "*"
+        self._select: _Select = _Select(("*",))
         self._sync_transport: _SyncHttpTransport | None = None
         self._async_transport: _AsyncHttpTransport | None = None
 
@@ -616,24 +618,32 @@ class PostsQueryBuilder:
     @overload
     def select(self, column: Literal["view_count"]) -> PostsQuery_view_count: ...
     def select(self, column: str) -> object:
-        self._select = column
         if column == "*":
+            self._select = _Select(("*",))
             return PostsQuery_star(self)
         if column == "author_id":
+            self._select = _Select(("author_id",))
             return PostsQuery_author_id(self)
         if column == "body":
+            self._select = _Select(("body",))
             return PostsQuery_body(self)
         if column == "edited_on":
+            self._select = _Select(("edited_on",))
             return PostsQuery_edited_on(self)
         if column == "id":
+            self._select = _Select(("id",))
             return PostsQuery_id(self)
         if column == "published_at":
+            self._select = _Select(("published_at",))
             return PostsQuery_published_at(self)
         if column == "reminder_time":
+            self._select = _Select(("reminder_time",))
             return PostsQuery_reminder_time(self)
         if column == "title":
+            self._select = _Select(("title",))
             return PostsQuery_title(self)
         if column == "view_count":
+            self._select = _Select(("view_count",))
             return PostsQuery_view_count(self)
         msg = f"unknown column {column!r}"
         raise ValueError(msg)
@@ -815,7 +825,7 @@ class UsersQueryBuilder:
 
     def __init__(self) -> None:
         self._filters: list[tuple[str, str, str]] = []
-        self._select: str = "*"
+        self._select: _Select = _Select(("*",))
         self._sync_transport: _SyncHttpTransport | None = None
         self._async_transport: _AsyncHttpTransport | None = None
 
@@ -1492,28 +1502,38 @@ class UsersQueryBuilder:
     @overload
     def select(self, column: Literal["tags"]) -> UsersQuery_tags: ...
     def select(self, column: str) -> object:
-        self._select = column
         if column == "*":
+            self._select = _Select(("*",))
             return UsersQuery_star(self)
         if column == "avatar":
+            self._select = _Select(("avatar",))
             return UsersQuery_avatar(self)
         if column == "created_at":
+            self._select = _Select(("created_at",))
             return UsersQuery_created_at(self)
         if column == "display_name":
+            self._select = _Select(("display_name",))
             return UsersQuery_display_name(self)
         if column == "email":
+            self._select = _Select(("email",))
             return UsersQuery_email(self)
         if column == "id":
+            self._select = _Select(("id",))
             return UsersQuery_id(self)
         if column == "is_active":
+            self._select = _Select(("is_active",))
             return UsersQuery_is_active(self)
         if column == "kind":
+            self._select = _Select(("kind",))
             return UsersQuery_kind(self)
         if column == "metadata":
+            self._select = _Select(("metadata",))
             return UsersQuery_metadata(self)
         if column == "score":
+            self._select = _Select(("score",))
             return UsersQuery_score(self)
         if column == "tags":
+            self._select = _Select(("tags",))
             return UsersQuery_tags(self)
         msg = f"unknown column {column!r}"
         raise ValueError(msg)

@@ -8,11 +8,11 @@
 
 Generate a fully typed Python **types layer** from a Supabase / PostgREST OpenAPI schema (`GET /rest/v1/`).
 
-Supabase documents `supabase gen types typescript` and, in newer CLI releases, `supabase gen types --lang=python` from **database introspection**. The official runtime stack (`supabase-py` → `postgrest-py`) still returns `dict` / `list[dict]` from `.execute()` unless you wrap rows yourself. **schema2client** targets the **PostgREST OpenAPI document** (offline file or exported root spec) and emits `TypedDict` read shapes, Pydantic write models, and query builders with single-column `select()` narrowing so `mypy --strict` catches column typos before deploy.
+Supabase documents `supabase gen types typescript` and, in newer CLI releases, `supabase gen types --lang=python` from **database introspection**. The official runtime stack (`supabase-py` → `postgrest-py`) still returns `dict` / `list[dict]` from `.execute()` unless you wrap rows yourself. **schema2client** reads a **PostgREST OpenAPI document** and emits a Python package: `TypedDict` read shapes, Pydantic write models, query builders, and `Client` / `AsyncClient` classes that delegate HTTP to `postgrest-py`. Single-column `select()` narrowing makes column typos a `mypy --strict` error.
 
 ## What this is — and what it isn't
 
-**schema2client is a generator.** It does not replace `supabase-py` or `postgrest-py`; those remain the HTTP clients. This project emits types and thin typed wrappers you import alongside your existing client.
+**schema2client generates a package you import.** `Client` and `AsyncClient` wrap `postgrest-py` (the official PostgREST HTTP client). Query builders on that client are the interface for table reads: filters and single-column `select()` are checked by mypy. It does not implement Supabase auth, realtime, or storage, and it does not replace `supabase-py` for those APIs.
 
 ## The receipt
 
@@ -34,12 +34,13 @@ zero type: ignore in generated output
 Single-column `select()` only (`@overload` per column, not TypeVars):
 
 ```python
-from mydb.query_builder import UsersQueryBuilder
+from mydb import Client
 
-qb = UsersQueryBuilder()
-reveal_type(qb.select("id").execute())  # list[Users_id]
-reveal_type(qb.select("*").execute())  # list[UsersRow]
-# qb.select("idd")  # mypy error: no matching overload
+client = Client("https://example.supabase.co/rest/v1", "anon-key")
+rows = client.table("users").eq("email", "user@example.com").select("id").execute()
+reveal_type(rows)  # list[Users_id]
+reveal_type(client.users().select("*").execute())  # list[UsersRow]
+# client.table("users").select("idd")  # mypy error: no matching overload
 ```
 
 Multi-column `.select("id, email")` is **deliberately not implemented** in v0: Python has no template-literal types; combinatorial `@overload` sets are exponential and a curated subset would lie about coverage.
