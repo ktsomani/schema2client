@@ -1,0 +1,56 @@
+"""Read and write types for PostgREST tables."""
+
+from __future__ import annotations
+
+{% for module in stdlib_imports %}
+{% if module != "enum" %}
+import {{ module }}
+{% endif %}
+{% endfor %}
+{% if "enum" in stdlib_imports %}
+from enum import StrEnum
+{% endif %}
+from pydantic import BaseModel, ConfigDict
+{% if typing_imports %}
+from typing import {{ typing_imports | join(", ") }}
+{% endif %}
+from typing_extensions import TypedDict
+
+
+{% for table in tables %}
+{% for enum_def in table.enums %}
+class {{ enum_def.name }}(StrEnum):
+    {% for value in enum_def.values %}
+    {{ value }} = {{ value | tojson }}
+    {% endfor %}
+
+{% endfor %}
+class {{ table.row_class }}(TypedDict):
+    {% for column in table.columns %}
+    {{ column.name }}: {{ column.read_type }}
+    {% endfor %}
+
+{% for column in table.columns %}
+class {{ col_td_name(table.prefix, column.name) }}(TypedDict):
+    {{ column.name }}: {{ column.read_type }}
+
+{% endfor %}
+class {{ table.insert_class }}(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    {% for column in table.columns %}
+    {% if column.nullable %}
+    {{ column.name }}: {{ column.write_optional_type }} = None
+    {% else %}
+    {{ column.name }}: {{ column.write_required_type }}
+    {% endif %}
+    {% endfor %}
+
+class {{ table.update_class }}(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    {% for column in table.columns %}
+    {{ column.name }}: {{ column.write_optional_type }} = None
+    {% endfor %}
+
+{% endfor %}

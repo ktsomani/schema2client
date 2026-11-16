@@ -1,0 +1,58 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+      - name: Install
+        run: uv sync --extra dev
+      # 1. Lint. Includes generated output. No # ruff: noqa anywhere.
+      - name: ruff check
+        run: uv run ruff check .
+      - name: ruff format --check
+        run: uv run ruff format --check .
+      # 2. Types. strict on src AND generated output. files= in pyproject.
+      - name: mypy --strict
+        run: uv run mypy
+      # 3. Snapshots. No --snapshot-update in CI. Ever.
+      - name: pytest
+        run: uv run pytest
+      # 4. Zero-ignores gate. This is what the README badge links to.
+      - name: generated output contains no type: ignore
+        run: |
+          if grep -rn "type: ignore" fixtures/generated/mydb/; then
+            echo "::error::type: ignore found in generated output"
+            exit 1
+          fi
+          echo "zero type: ignore in generated output"
+      # 5. Drift gate. Canonical regeneration must be byte-identical to what
+      #    is committed. This is what makes the fixture diff trustworthy.
+      - name: generated output matches committed fixture
+        run: |
+          uv run schema2client generate \
+            --spec fixtures/sample_spec.json \
+            --out fixtures/generated \
+            --package mydb
+          if ! git diff --quiet -- fixtures/generated; then
+            echo "::error::generated output drifted from committed fixture"
+            git --no-pager diff -- fixtures/generated
+            exit 1
+          fi
+          echo "generated output matches committed fixture"

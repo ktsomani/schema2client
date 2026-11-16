@@ -1,0 +1,101 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "schema2client"
+version = "0.1.0"
+description = "Generate a fully typed Python client from a Supabase / PostgREST schema."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "soman" }]
+keywords = ["supabase", "postgrest", "openapi", "codegen", "pydantic", "mypy"]
+classifiers = [
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Typing :: Typed",
+  "License :: OSI Approved :: MIT License",
+]
+dependencies = [
+  "httpx>=0.27",
+  "pydantic>=2.6",
+  "jinja2>=3.1",
+  "click>=8.1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "mypy>=1.10",
+  "ruff>=0.5",
+  "pytest>=8.2",
+  "pytest-syrupy>=4.6",
+]
+
+[project.scripts]
+schema2client = "schema2client.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/soman/schema2client"
+Repository = "https://github.com/soman/schema2client"
+Issues = "https://github.com/soman/schema2client/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/schema2client"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/schema2client", "README.md", "pyproject.toml"]
+
+# ------------------------------ ruff ------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "fixtures/generated/mydb", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+# No ignores at file level. If generated code trips a rule, fix the TEMPLATE.
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/*.py" = ["E402"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["schema2client", "mydb"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+# ------------------------------ mypy ------------------------------
+[tool.mypy]
+python_version = "3.11"
+files = ["src", "fixtures/generated/mydb"]
+strict = true
+warn_return_any = true
+warn_unused_ignores = true
+disallow_any_generics = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+show_error_codes = true
+pretty = true
+mypy_path = "src"
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["mydb.*"]
+# The mechanical enforcement of "no Any in generated output".
+disallow_any_explicit = true
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+
+# ----------------------------- pytest -----------------------------
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = "-ra --strict-markers --strict-config"
+filterwarnings = ["error"]
+
+[tool.syrupy]
+always_update_snapshots = false
